@@ -4,8 +4,11 @@ const https = require('https');
 const JIRA_DOMAIN = process.env.JIRA_DOMAIN || 'melity.atlassian.net';
 const EMAIL = process.env.JIRA_EMAIL || '';
 const API_TOKEN = process.env.JIRA_API_TOKEN || '';
-
 const PORT = process.env.PORT || 3000;
+
+console.log('JIRA_DOMAIN:', JIRA_DOMAIN ? 'SET' : 'NOT SET');
+console.log('JIRA_EMAIL:', EMAIL ? 'SET' : 'NOT SET');
+console.log('JIRA_API_TOKEN:', API_TOKEN ? 'SET' : 'NOT SET');
 
 const server = http.createServer((req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -49,12 +52,21 @@ const server = http.createServer((req, res) => {
 function proxyJiraRequest(jql, fields, callback) {
   const credentials = Buffer.from(`${EMAIL}:${API_TOKEN}`).toString('base64');
   const postData = JSON.stringify({ jql, maxResults: 100, fields: fields || ['key', 'summary', 'worklog'] });
+  console.log('Making request to Jira with JQL:', jql);
   const options = {
     hostname: JIRA_DOMAIN, port: 443, path: '/rest/api/3/search/jql', method: 'POST',
     headers: { 'Authorization': `Basic ${credentials}`, 'Accept': 'application/json', 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(postData) }
   };
-  const req = https.request(options, (res) => { let data = ''; res.on('data', chunk => data += chunk); res.on('end', () => callback(null, data)); });
-  req.on('error', callback);
+  const req = https.request(options, (res) => {
+    let data = '';
+    res.on('data', chunk => data += chunk);
+    res.on('end', () => {
+      console.log('Jira response status:', res.statusCode, 'data length:', data.length);
+      if (data.length < 200) console.log('Jira response:', data);
+      callback(null, data);
+    });
+  });
+  req.on('error', (e) => console.error('Jira request error:', e.message));
   req.write(postData);
   req.end();
 }
