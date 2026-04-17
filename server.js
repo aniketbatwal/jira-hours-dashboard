@@ -1,11 +1,11 @@
 const http = require('http');
 const https = require('https');
 
-const JIRA_DOMAIN = 'melity.atlassian.net';
-const EMAIL = 'aniket.batwal@sphereglobal.com';
-const API_TOKEN = 'ATATT3xFfGF0vEEnd7Fxw1LjDOeTbsL0Ex-EJ-9r9HyDNWywWcIkkj3w5VY8YSNouxNPHAq0b6Nc8Q8EnEuxskh5Vc_mXZcF9qpkMURO2q_wDp6h1HV2Tr-pFkc6bo-8v1ymx5NCUQcqmyOCg2b0-2ByhIWuFP_-nHn7nCV051NRQ2AJnpugkMQ=11385913';
+const JIRA_DOMAIN = process.env.JIRA_DOMAIN || 'melity.atlassian.net';
+const EMAIL = process.env.JIRA_EMAIL || '';
+const API_TOKEN = process.env.JIRA_API_TOKEN || '';
 
-const PORT = 3000;
+const PORT = process.env.PORT || 3000;
 
 const server = http.createServer((req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
