@@ -1,0 +1,12 @@
+{
+  "name": "jira-hours-dashboard",
+  "version": "1.0.0",
+  "description": "Jira Hours Dashboard for SphereGlobal",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
