@@ -1,11 +1,14 @@
 const http = require('http');
 const https = require('https');
 
-const JIRA_DOMAIN = 'melity.atlassian.net';
-const EMAIL = 'aniket.batwal@sphereglobal.com';
-const API_TOKEN = 'ATATT3xFfGF0vEEnd7Fxw1LjDOeTbsL0Ex-EJ-9r9HyDNWywWcIkkj3w5VY8YSNouxNPHAq0b6Nc8Q8EnEuxskh5Vc_mXZcF9qpkMURO2q_wDp6h1HV2Tr-pFkc6bo-8v1ymx5NCUQcqmyOCg2b0-2ByhIWuFP_-nHn7nCV051NRQ2AJnpugkMQ=11385913';
+const JIRA_DOMAIN = process.env.JIRA_DOMAIN || 'melity.atlassian.net';
+const EMAIL = process.env.JIRA_EMAIL || '';
+const API_TOKEN = process.env.JIRA_API_TOKEN || '';
+const PORT = process.env.PORT || 3000;
 
-const PORT = 3000;
+console.log('JIRA_DOMAIN:', JIRA_DOMAIN ? 'SET' : 'NOT SET');
+console.log('JIRA_EMAIL:', EMAIL ? 'SET' : 'NOT SET');
+console.log('JIRA_API_TOKEN:', API_TOKEN ? 'SET' : 'NOT SET');
 
 const server = http.createServer((req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -49,12 +52,21 @@ const server = http.createServer((req, res) => {
 function proxyJiraRequest(jql, fields, callback) {
   const credentials = Buffer.from(`${EMAIL}:${API_TOKEN}`).toString('base64');
   const postData = JSON.stringify({ jql, maxResults: 100, fields: fields || ['key', 'summary', 'worklog'] });
+  console.log('Making request to Jira with JQL:', jql);
   const options = {
     hostname: JIRA_DOMAIN, port: 443, path: '/rest/api/3/search/jql', method: 'POST',
     headers: { 'Authorization': `Basic ${credentials}`, 'Accept': 'application/json', 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(postData) }
   };
-  const req = https.request(options, (res) => { let data = ''; res.on('data', chunk => data += chunk); res.on('end', () => callback(null, data)); });
-  req.on('error', callback);
+  const req = https.request(options, (res) => {
+    let data = '';
+    res.on('data', chunk => data += chunk);
+    res.on('end', () => {
+      console.log('Jira response status:', res.statusCode, 'data length:', data.length);
+      if (data.length < 200) console.log('Jira response:', data);
+      callback(null, data);
+    });
+  });
+  req.on('error', (e) => console.error('Jira request error:', e.message));
   req.write(postData);
   req.end();
 }
@@ -422,8 +434,17 @@ function getHTML() {
         </div>
       </div>
       <div class="header-right">
-        <div class="company-badge">Sphere<span style="color: var(--primary)">Global</span></div>
-        <div class="company-badge" id="reportPeriod" style="margin-top: 8px;">Loading...</div>
+        <div class="control-group">
+          <label style="font-size: 12px; color: var(--text-secondary);">Project:</label>
+          <select id="projectSelect" onchange="changeProject()" style="min-width: 150px;">
+            <option value="HY">HY — HawkYard</option>
+            <option value="PNX">PNX — Prism 2.0</option>
+          </select>
+        </div>
+        <div>
+          <div class="company-badge">Sphere<span style="color: var(--primary)">Global</span></div>
+          <div class="company-badge" id="reportPeriod" style="margin-top: 8px;">Loading...</div>
+        </div>
       </div>
     </div>
 
@@ -442,6 +463,12 @@ function getHTML() {
         <div class="control-group">
           <label>Date:</label>
           <input type="date" id="dailyDate">
+        </div>
+        <div class="control-group">
+          <label>User:</label>
+          <select id="dailyUser">
+            <option value="">All Users</option>
+          </select>
         </div>
         <button onclick="loadDaily()">Load Report</button>
       </div>
@@ -482,6 +509,12 @@ function getHTML() {
         <div class="control-group">
           <label>End Date:</label>
           <input type="date" id="days7End">
+        </div>
+        <div class="control-group">
+          <label>User:</label>
+          <select id="days7User">
+            <option value="">All Users</option>
+          </select>
         </div>
         <button onclick="loadDateRange(7)">Load 7 Days</button>
       </div>
@@ -532,6 +565,12 @@ function getHTML() {
         <div class="control-group">
           <label>End Date:</label>
           <input type="date" id="days15End">
+        </div>
+        <div class="control-group">
+          <label>User:</label>
+          <select id="days15User">
+            <option value="">All Users</option>
+          </select>
         </div>
         <button onclick="loadDateRange(15)">Load 15 Days</button>
       </div>
@@ -591,6 +630,12 @@ function getHTML() {
           <label>End:</label>
           <input type="date" id="sprintEnd">
         </div>
+        <div class="control-group">
+          <label>User:</label>
+          <select id="sprintUser">
+            <option value="">All Users</option>
+          </select>
+        </div>
         <button onclick="loadCustomRange()">Load Range</button>
       </div>
 
@@ -633,8 +678,18 @@ function getHTML() {
   </div>
 
   <script>
-    const PROJECT = 'HY';
+    let currentProject = 'HY';
     let dailyPieChart, dailyTrendChart, teamPieChart7, teamPieChart15, teamPieChartSprint, sprintTrendChart;
+
+    function changeProject() {
+      currentProject = document.getElementById('projectSelect').value;
+      // Trigger load on current tab
+      const activeTab = document.querySelector('.tab.active').dataset.tab;
+      if (activeTab === 'daily') loadDaily();
+      else if (activeTab === '7days') loadDateRange(7);
+      else if (activeTab === '15days') loadDateRange(15);
+      else if (activeTab === 'sprint') loadCustomRange();
+    }
 
     // Chart defaults
     Chart.defaults.color = '#8B949E';
@@ -793,10 +848,13 @@ function getHTML() {
     // DAILY TAB
     async function loadDaily() {
       const date = document.getElementById('dailyDate').value;
+      const userFilter = document.getElementById('dailyUser').value;
       if (!date) return;
       document.getElementById('reportPeriod').textContent = formatDateDisplay(date);
+      let jql = "project = '" + currentProject + "' AND worklogDate = '" + date + "'";
+      if (userFilter) jql += " AND worklogAuthor = '" + userFilter + "'";
       try {
-        const data = await fetchJira("project = '" + PROJECT + "' AND worklogDate = '" + date + "'");
+        const data = await fetchJira(jql);
         if (data.error) throw new Error(data.error);
         renderDaily(data, date);
       } catch (err) { showError(err.message); }
@@ -805,34 +863,47 @@ function getHTML() {
     function renderDaily(data, date) {
       const issues = data.issues || [];
       const worklogs = extractWorklogs(issues, date);
-      const totalSec = worklogs.reduce((s,w) => s + w.timeSpentSeconds, 0);
+      const userFilter = document.getElementById('dailyUser').value;
+      const filteredWorklogs = userFilter ? worklogs.filter(w => w.user === userFilter) : worklogs;
+      const totalSec = filteredWorklogs.reduce((s,w) => s + w.timeSpentSeconds, 0);
       const users = [...new Set(worklogs.map(w=>w.user))];
-      const avgSec = users.length ? totalSec / users.length : 0;
+
+      // Populate user dropdown
+      const userSelect = document.getElementById('dailyUser');
+      const currentUser = userSelect.value;
+      userSelect.innerHTML = '<option value="">All Users</option>' + users.map(u => '<option value="'+u+'">'+u+'</option>').join('');
+      userSelect.value = currentUser || '';
 
       document.getElementById('dailyTotal').textContent = formatHoursShort(totalSec);
       document.getElementById('dailyIssues').textContent = issues.length;
       document.getElementById('dailyUsers').textContent = users.length;
-      document.getElementById('dailyAvg').textContent = formatHoursShort(avgSec);
-      document.getElementById('dailyWorklogCount').textContent = worklogs.length + ' entries';
+      document.getElementById('dailyAvg').textContent = users.length ? formatHoursShort(totalSec / users.length) : '0h';
+      document.getElementById('dailyWorklogCount').textContent = filteredWorklogs.length + ' entries';
 
       const userStats = {};
-      worklogs.forEach(wl => { if (!userStats[wl.user]) userStats[wl.user] = 0; userStats[wl.user] += wl.timeSpentSeconds; });
+      filteredWorklogs.forEach(wl => { if (!userStats[wl.user]) userStats[wl.user] = 0; userStats[wl.user] += wl.timeSpentSeconds; });
 
       const sortedUsers = Object.keys(userStats).sort((a,b) => userStats[b]-userStats[a]);
-      createPieChart('dailyPieChart', sortedUsers, sortedUsers.map(u => userStats[u]/3600));
-      renderTeamBars('dailyTeamBars', sortedUsers, sortedUsers.map(u => userStats[u]), totalSec);
+      if (sortedUsers.length > 0) {
+        createPieChart('dailyPieChart', sortedUsers, sortedUsers.map(u => userStats[u]/3600));
+        renderTeamBars('dailyTeamBars', sortedUsers, sortedUsers.map(u => userStats[u]), totalSec);
+      } else {
+        destroyChart('dailyPieChart');
+        document.getElementById('dailyTeamBars').innerHTML = '<div class="empty">No data for selected user</div>';
+      }
 
       const tbody = document.getElementById('dailyDetail');
       tbody.innerHTML = '';
-      worklogs.forEach(wl => {
+      filteredWorklogs.forEach(wl => {
         tbody.innerHTML += '<tr><td><div class="user-cell"><div class="avatar">'+getInitials(wl.user)+'</div>'+wl.user+'</div></td><td><strong>'+wl.issue+'</strong></td><td style="color:#71717a;max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+wl.summary+'</td><td class="time-cell">'+wl.timeSpent+'</td></tr>';
       });
-      if (worklogs.length === 0) tbody.innerHTML = '<tr><td colspan="4" class="empty">No worklogs found for this date.</td></tr>';
+      if (filteredWorklogs.length === 0) tbody.innerHTML = '<tr><td colspan="4" class="empty">No worklogs found for this date.</td></tr>';
     }
 
     // DATE RANGE (7/15 DAYS)
     async function loadDateRange(days) {
       const endDateStr = document.getElementById('days' + days + 'End').value;
+      const userFilter = document.getElementById('days' + days + 'User').value;
       if (!endDateStr) return;
       const endDate = new Date(endDateStr);
       const startDate = new Date(endDate.getTime() - (days - 1) * 24 * 60 * 60 * 1000);
@@ -840,8 +911,9 @@ function getHTML() {
       const endStr = endDateStr;
       document.getElementById('reportPeriod').textContent = formatDateDisplay(startStr) + ' - ' + formatDateDisplay(endStr);
 
+      let jql = "project = '" + currentProject + "' AND worklogDate >= '" + startStr + "' AND worklogDate <= '" + endStr + "'";
+      if (userFilter) jql += " AND worklogAuthor = '" + userFilter + "'";
       try {
-        const jql = "project = '" + PROJECT + "' AND worklogDate >= '" + startStr + "' AND worklogDate <= '" + endStr + "'";
         const data = await fetchJira(jql);
         if (data.error) throw new Error(data.error);
         renderDateRange(data, startStr, endStr, days);
@@ -851,15 +923,23 @@ function getHTML() {
     function renderDateRange(data, startStr, endStr, days) {
       const issues = data.issues || [];
       const worklogs = extractWorklogs(issues, null, startStr, endStr);
-      const totalSec = worklogs.reduce((s,w) => s + w.timeSpentSeconds, 0);
-      const users = [...new Set(worklogs.map(w=>w.user))];
+      const userFilter = document.getElementById('days' + days + 'User').value;
+      const filteredWorklogs = userFilter ? worklogs.filter(w => w.user === userFilter) : worklogs;
+      const totalSec = filteredWorklogs.reduce((s,w) => s + w.timeSpentSeconds, 0);
+      const allUsers = [...new Set(worklogs.map(w=>w.user))];
+
+      // Populate user dropdown
+      const userSelect = document.getElementById('days' + days + 'User');
+      const currentUser = userSelect.value;
+      userSelect.innerHTML = '<option value="">All Users</option>' + allUsers.map(u => '<option value="'+u+'">'+u+'</option>').join('');
+      userSelect.value = currentUser || '';
 
       document.getElementById('range' + days + 'Total').textContent = formatHoursShort(totalSec);
       document.getElementById('range' + days + 'Issues').textContent = issues.length;
-      document.getElementById('range' + days + 'Users').textContent = users.length;
+      document.getElementById('range' + days + 'Users').textContent = allUsers.length;
 
       const dailyMap = {};
-      worklogs.forEach(wl => {
+      filteredWorklogs.forEach(wl => {
         const d = wl.started.split('T')[0];
         if (!dailyMap[d]) dailyMap[d] = { seconds: 0, users: new Set() };
         dailyMap[d].seconds += wl.timeSpentSeconds;
@@ -870,10 +950,12 @@ function getHTML() {
       const sortedDates = Object.keys(dailyMap).sort();
       const dayLabels = sortedDates.map(d => formatDateDisplay(d).split(',')[0]);
       const dayData = sortedDates.map(d => dailyMap[d].seconds / 3600);
-      createLineChart('dailyTrendChart' + (days === 7 ? '' : '15'), dayLabels, dayData);
+      if (sortedDates.length > 0) {
+        createLineChart('dailyTrendChart' + (days === 7 ? '' : '15'), dayLabels, dayData);
+      }
 
       const userStats = {}, userIssues = {}, userDays = {};
-      worklogs.forEach(wl => {
+      filteredWorklogs.forEach(wl => {
         const d = wl.started.split('T')[0];
         if (!userStats[wl.user]) { userStats[wl.user] = 0; userIssues[wl.user] = new Set(); userDays[wl.user] = new Set(); }
         userStats[wl.user] += wl.timeSpentSeconds;
@@ -881,8 +963,13 @@ function getHTML() {
         userDays[wl.user].add(d);
       });
       const sortedUsers = Object.keys(userStats).sort((a,b) => userStats[b]-userStats[a]);
-      createPieChart('teamPieChart' + days, sortedUsers, sortedUsers.map(u => userStats[u]/3600));
-      renderTeamBars('range' + days + 'TeamBars', sortedUsers, sortedUsers.map(u => userStats[u]), totalSec);
+      if (sortedUsers.length > 0) {
+        createPieChart('teamPieChart' + days, sortedUsers, sortedUsers.map(u => userStats[u]/3600));
+        renderTeamBars('range' + days + 'TeamBars', sortedUsers, sortedUsers.map(u => userStats[u]), totalSec);
+      } else {
+        destroyChart('teamPieChart' + days);
+        document.getElementById('range' + days + 'TeamBars').innerHTML = '<div class="empty">No data for selected user</div>';
+      }
 
       const dailyDiv = document.getElementById('range' + days + 'Daily');
       dailyDiv.innerHTML = '';
@@ -895,7 +982,7 @@ function getHTML() {
 
       // Build date-wise user stats
       const dateUserMap = {};
-      worklogs.forEach(wl => {
+      filteredWorklogs.forEach(wl => {
         const d = wl.started.split('T')[0];
         if (!dateUserMap[d]) dateUserMap[d] = {};
         if (!dateUserMap[d][wl.user]) { dateUserMap[d][wl.user] = { seconds: 0, issues: new Set() }; }
@@ -920,12 +1007,14 @@ function getHTML() {
       const sprintName = document.getElementById('sprintName').value || 'Custom Sprint';
       const start = document.getElementById('sprintStart').value;
       const end = document.getElementById('sprintEnd').value;
+      const userFilter = document.getElementById('sprintUser').value;
       if (!start || !end) { showError('Please enter both start and end dates'); return; }
 
       document.getElementById('reportPeriod').textContent = sprintName + ' (' + formatDateDisplay(start) + ' - ' + formatDateDisplay(end) + ')';
 
+      let jql = "project = '" + currentProject + "' AND worklogDate >= '" + start + "' AND worklogDate <= '" + end + "'";
+      if (userFilter) jql += " AND worklogAuthor = '" + userFilter + "'";
       try {
-        const jql = "project = '" + PROJECT + "' AND worklogDate >= '" + start + "' AND worklogDate <= '" + end + "'";
         const data = await fetchJira(jql);
         if (data.error) throw new Error(data.error);
         renderCustomRange(data, sprintName, start, end);
@@ -935,8 +1024,17 @@ function getHTML() {
     function renderCustomRange(data, sprintName, start, end) {
       const issues = data.issues || [];
       const worklogs = extractWorklogs(issues, null, start, end);
-      const totalSec = worklogs.reduce((s,w) => s + w.timeSpentSeconds, 0);
-      const users = [...new Set(worklogs.map(w=>w.user))];
+      const userFilter = document.getElementById('sprintUser').value;
+      const filteredWorklogs = userFilter ? worklogs.filter(w => w.user === userFilter) : worklogs;
+      const allUsers = [...new Set(worklogs.map(w=>w.user))];
+
+      // Populate user dropdown
+      const userSelect = document.getElementById('sprintUser');
+      const currentUser = userSelect.value;
+      userSelect.innerHTML = '<option value="">All Users</option>' + allUsers.map(u => '<option value="'+u+'">'+u+'</option>').join('');
+      userSelect.value = currentUser || '';
+
+      const totalSec = filteredWorklogs.reduce((s,w) => s + w.timeSpentSeconds, 0);
 
       const startDate = new Date(start);
       const endDate = new Date(end);
@@ -944,12 +1042,12 @@ function getHTML() {
 
       document.getElementById('sprintTotal').textContent = formatHoursShort(totalSec);
       document.getElementById('sprintIssues').textContent = issues.length;
-      document.getElementById('sprintUsers').textContent = users.length;
+      document.getElementById('sprintUsers').textContent = allUsers.length;
       document.getElementById('sprintDays').textContent = dayCount;
-      document.getElementById('sprintWorklogCount').textContent = worklogs.length + ' entries';
+      document.getElementById('sprintWorklogCount').textContent = filteredWorklogs.length + ' entries';
 
       const dailyMap = {};
-      worklogs.forEach(wl => {
+      filteredWorklogs.forEach(wl => {
         const d = wl.started.split('T')[0];
         if (!dailyMap[d]) dailyMap[d] = { seconds: 0 };
         dailyMap[d].seconds += wl.timeSpentSeconds;
@@ -957,12 +1055,16 @@ function getHTML() {
       const sortedDates = Object.keys(dailyMap).sort();
       const dayLabels = sortedDates.map(d => formatDateDisplay(d).split(',')[0]);
       const dayData = sortedDates.map(d => dailyMap[d].seconds / 3600);
-      createLineChart('sprintTrendChart', dayLabels, dayData);
+      if (sortedDates.length > 0) {
+        createLineChart('sprintTrendChart', dayLabels, dayData);
+      }
 
       const userStats = {};
-      worklogs.forEach(wl => { if (!userStats[wl.user]) userStats[wl.user] = 0; userStats[wl.user] += wl.timeSpentSeconds; });
+      filteredWorklogs.forEach(wl => { if (!userStats[wl.user]) userStats[wl.user] = 0; userStats[wl.user] += wl.timeSpentSeconds; });
       const sortedUsers = Object.keys(userStats).sort((a,b) => userStats[b]-userStats[a]);
-      createPieChart('sprintPieChart', sortedUsers, sortedUsers.map(u => userStats[u]/3600));
+      if (sortedUsers.length > 0) {
+        createPieChart('sprintPieChart', sortedUsers, sortedUsers.map(u => userStats[u]/3600));
+      }
 
       const tbody = document.getElementById('sprintDetail');
       tbody.innerHTML = '';
@@ -994,6 +1096,6 @@ function getHTML() {
 </html>`;
 }
 
-server.listen(PORT, () => {
-  console.log(`Dashboard running at http://localhost:${PORT}`);
+server.listen(PORT, '0.0.0.0', () => {
+  console.log(`Server running on port ${PORT}`);
 });
