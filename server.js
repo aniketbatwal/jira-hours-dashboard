@@ -434,8 +434,17 @@ function getHTML() {
         </div>
       </div>
       <div class="header-right">
-        <div class="company-badge">Sphere<span style="color: var(--primary)">Global</span></div>
-        <div class="company-badge" id="reportPeriod" style="margin-top: 8px;">Loading...</div>
+        <div class="control-group">
+          <label style="font-size: 12px; color: var(--text-secondary);">Project:</label>
+          <select id="projectSelect" onchange="changeProject()" style="min-width: 150px;">
+            <option value="HY">HY — HawkYard</option>
+            <option value="PNX">PNX — Prism 2.0</option>
+          </select>
+        </div>
+        <div>
+          <div class="company-badge">Sphere<span style="color: var(--primary)">Global</span></div>
+          <div class="company-badge" id="reportPeriod" style="margin-top: 8px;">Loading...</div>
+        </div>
       </div>
     </div>
 
@@ -669,8 +678,18 @@ function getHTML() {
   </div>
 
   <script>
-    const PROJECT = 'HY';
+    let currentProject = 'HY';
     let dailyPieChart, dailyTrendChart, teamPieChart7, teamPieChart15, teamPieChartSprint, sprintTrendChart;
+
+    function changeProject() {
+      currentProject = document.getElementById('projectSelect').value;
+      // Trigger load on current tab
+      const activeTab = document.querySelector('.tab.active').dataset.tab;
+      if (activeTab === 'daily') loadDaily();
+      else if (activeTab === '7days') loadDateRange(7);
+      else if (activeTab === '15days') loadDateRange(15);
+      else if (activeTab === 'sprint') loadCustomRange();
+    }
 
     // Chart defaults
     Chart.defaults.color = '#8B949E';
@@ -832,7 +851,7 @@ function getHTML() {
       const userFilter = document.getElementById('dailyUser').value;
       if (!date) return;
       document.getElementById('reportPeriod').textContent = formatDateDisplay(date);
-      let jql = "project = '" + PROJECT + "' AND worklogDate = '" + date + "'";
+      let jql = "project = '" + currentProject + "' AND worklogDate = '" + date + "'";
       if (userFilter) jql += " AND worklogAuthor = '" + userFilter + "'";
       try {
         const data = await fetchJira(jql);
@@ -892,7 +911,7 @@ function getHTML() {
       const endStr = endDateStr;
       document.getElementById('reportPeriod').textContent = formatDateDisplay(startStr) + ' - ' + formatDateDisplay(endStr);
 
-      let jql = "project = '" + PROJECT + "' AND worklogDate >= '" + startStr + "' AND worklogDate <= '" + endStr + "'";
+      let jql = "project = '" + currentProject + "' AND worklogDate >= '" + startStr + "' AND worklogDate <= '" + endStr + "'";
       if (userFilter) jql += " AND worklogAuthor = '" + userFilter + "'";
       try {
         const data = await fetchJira(jql);
@@ -993,7 +1012,7 @@ function getHTML() {
 
       document.getElementById('reportPeriod').textContent = sprintName + ' (' + formatDateDisplay(start) + ' - ' + formatDateDisplay(end) + ')';
 
-      let jql = "project = '" + PROJECT + "' AND worklogDate >= '" + start + "' AND worklogDate <= '" + end + "'";
+      let jql = "project = '" + currentProject + "' AND worklogDate >= '" + start + "' AND worklogDate <= '" + end + "'";
       if (userFilter) jql += " AND worklogAuthor = '" + userFilter + "'";
       try {
         const data = await fetchJira(jql);
