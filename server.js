@@ -859,17 +859,19 @@ function getHTML() {
 
     function extractWorklogs(issues, date, startDate, endDate) {
       const worklogs = [];
+      const selectedAccountId = getSelectedAccountId();
       issues.forEach(issue => {
         if (issue.fields.worklog && issue.fields.worklog.worklogs) {
           issue.fields.worklog.worklogs.forEach(wl => {
             if (wl.started) {
-              // For daily queries, Jira has already filtered by worklogDate so we accept all returned worklogs
-              // For range queries, we need to filter by the actual started date
+              // When a user is selected, skip worklogs that don't belong to them.
+              // Jira returns all worklogs on matching issues, not just the filtered user's.
+              if (selectedAccountId && wl.author.accountId !== selectedAccountId) return;
               if (startDate && endDate) {
                 const wlDate = wl.started.split('T')[0];
-                if (wlDate >= startDate && wlDate <= endDate) worklogs.push({ user: wl.author.displayName, issue: issue.key, summary: issue.fields.summary, timeSpent: wl.timeSpent, timeSpentSeconds: wl.timeSpentSeconds, started: wl.started });
+                if (wlDate >= startDate && wlDate <= endDate) worklogs.push({ user: wl.author.displayName, accountId: wl.author.accountId, issue: issue.key, summary: issue.fields.summary, timeSpent: wl.timeSpent, timeSpentSeconds: wl.timeSpentSeconds, started: wl.started });
               } else {
-                worklogs.push({ user: wl.author.displayName, issue: issue.key, summary: issue.fields.summary, timeSpent: wl.timeSpent, timeSpentSeconds: wl.timeSpentSeconds, started: wl.started });
+                worklogs.push({ user: wl.author.displayName, accountId: wl.author.accountId, issue: issue.key, summary: issue.fields.summary, timeSpent: wl.timeSpent, timeSpentSeconds: wl.timeSpentSeconds, started: wl.started });
               }
             }
           });
