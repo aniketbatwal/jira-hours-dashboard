@@ -715,7 +715,7 @@ function getHTML() {
         if (Array.isArray(users)) {
           users.forEach(u => {
             const opt = document.createElement('option');
-            opt.value = u.displayName;
+            opt.value = u.accountId;        // accountId used in JQL filter
             opt.textContent = u.displayName;
             select.appendChild(opt);
           });
@@ -723,30 +723,35 @@ function getHTML() {
       } catch (e) { /* silent — users dropdown is optional */ }
     }
 
-    function getSelectedUser() {
-      return document.getElementById('globalUserFilter').value;
+    function getSelectedAccountId() {
+      return document.getElementById('globalUserFilter').value;  // accountId or ''
     }
 
-    function filterWorklogs(worklogs) {
-      const user = getSelectedUser();
-      return user ? worklogs.filter(w => w.user === user) : worklogs;
+    function getSelectedDisplayName() {
+      const select = document.getElementById('globalUserFilter');
+      return select.options[select.selectedIndex].textContent;
+    }
+
+    function buildAuthorFilter() {
+      const accountId = getSelectedAccountId();
+      return accountId ? " AND worklogAuthor = '" + accountId + "'" : '';
     }
 
     function onUserFilterChange() {
-      const user = getSelectedUser();
+      const accountId = getSelectedAccountId();
       const badge = document.getElementById('userFilterBadge');
-      if (user) {
+      if (accountId) {
         badge.style.display = 'inline';
-        badge.textContent = 'Filtered: ' + user;
+        badge.textContent = 'Filtered: ' + getSelectedDisplayName();
       } else {
         badge.style.display = 'none';
       }
-      // Re-render whichever tab is active
+      // Re-fetch with new JQL so server-side author filter is applied
       const activeTab = document.querySelector('.tab.active').dataset.tab;
-      if (activeTab === 'daily' && lastDailyData) renderDaily(lastDailyData, lastDailyDate);
-      else if (activeTab === '7days' && lastRange7Data) renderDateRange(lastRange7Data, lastRange7Start, lastRange7End, 7);
-      else if (activeTab === '15days' && lastRange15Data) renderDateRange(lastRange15Data, lastRange15Start, lastRange15End, 15);
-      else if (activeTab === 'sprint' && lastCustomData) renderCustomRange(lastCustomData, lastCustomName, lastCustomStart, lastCustomEnd);
+      if (activeTab === 'daily') loadDaily();
+      else if (activeTab === '7days') loadDateRange(7);
+      else if (activeTab === '15days') loadDateRange(15);
+      else if (activeTab === 'sprint') loadCustomRange();
     }
 
     async function fetchJira(jql, fields) {
@@ -879,7 +884,8 @@ function getHTML() {
       if (!date) return;
       document.getElementById('reportPeriod').textContent = formatDateDisplay(date);
       try {
-        const data = await fetchJira("project = '" + PROJECT + "' AND worklogDate = '" + date + "'");
+        const jql = "project = '" + PROJECT + "' AND worklogDate = '" + date + "'" + buildAuthorFilter();
+        const data = await fetchJira(jql);
         if (data.error) throw new Error(data.error);
         lastDailyData = data; lastDailyDate = date;
         renderDaily(data, date);
@@ -888,7 +894,7 @@ function getHTML() {
 
     function renderDaily(data, date) {
       const issues = data.issues || [];
-      const worklogs = filterWorklogs(extractWorklogs(issues, date));
+      const worklogs = extractWorklogs(issues, date);
       const totalSec = worklogs.reduce((s,w) => s + w.timeSpentSeconds, 0);
       const users = [...new Set(worklogs.map(w=>w.user))];
       const avgSec = users.length ? totalSec / users.length : 0;
@@ -925,7 +931,7 @@ function getHTML() {
       document.getElementById('reportPeriod').textContent = formatDateDisplay(startStr) + ' - ' + formatDateDisplay(endStr);
 
       try {
-        const jql = "project = '" + PROJECT + "' AND worklogDate >= '" + startStr + "' AND worklogDate <= '" + endStr + "'";
+        const jql = "project = '" + PROJECT + "' AND worklogDate >= '" + startStr + "' AND worklogDate <= '" + endStr + "'" + buildAuthorFilter();
         const data = await fetchJira(jql);
         if (data.error) throw new Error(data.error);
         if (days === 7) { lastRange7Data = data; lastRange7Start = startStr; lastRange7End = endStr; }
@@ -936,7 +942,7 @@ function getHTML() {
 
     function renderDateRange(data, startStr, endStr, days) {
       const issues = data.issues || [];
-      const worklogs = filterWorklogs(extractWorklogs(issues, null, startStr, endStr));
+      const worklogs = extractWorklogs(issues, null, startStr, endStr);
       const totalSec = worklogs.reduce((s,w) => s + w.timeSpentSeconds, 0);
       const users = [...new Set(worklogs.map(w=>w.user))];
 
@@ -1011,7 +1017,7 @@ function getHTML() {
       document.getElementById('reportPeriod').textContent = sprintName + ' (' + formatDateDisplay(start) + ' - ' + formatDateDisplay(end) + ')';
 
       try {
-        const jql = "project = '" + PROJECT + "' AND worklogDate >= '" + start + "' AND worklogDate <= '" + end + "'";
+        const jql = "project = '" + PROJECT + "' AND worklogDate >= '" + start + "' AND worklogDate <= '" + end + "'" + buildAuthorFilter();
         const data = await fetchJira(jql);
         if (data.error) throw new Error(data.error);
         lastCustomData = data; lastCustomStart = start; lastCustomEnd = end; lastCustomName = sprintName;
@@ -1021,7 +1027,7 @@ function getHTML() {
 
     function renderCustomRange(data, sprintName, start, end) {
       const issues = data.issues || [];
-      const worklogs = filterWorklogs(extractWorklogs(issues, null, start, end));
+      const worklogs = extractWorklogs(issues, null, start, end);
       const totalSec = worklogs.reduce((s,w) => s + w.timeSpentSeconds, 0);
       const users = [...new Set(worklogs.map(w=>w.user))];
 
