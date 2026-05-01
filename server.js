@@ -24,6 +24,19 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  if (req.url === '/api/users') {
+    proxyUsersRequest((err, data) => {
+      if (err) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+      } else {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(data);
+      }
+    });
+    return;
+  }
+
   if (req.url === '/api/jira') {
     let body = '';
     req.on('data', chunk => body += chunk);
@@ -45,6 +58,19 @@ const server = http.createServer((req, res) => {
   res.writeHead(404);
   res.end('Not found');
 });
+
+function proxyUsersRequest(callback) {
+  const credentials = Buffer.from(`${EMAIL}:${API_TOKEN}`).toString('base64');
+  const options = {
+    hostname: JIRA_DOMAIN, port: 443,
+    path: '/rest/api/3/user/assignable/search?project=HY&maxResults=100',
+    method: 'GET',
+    headers: { 'Authorization': `Basic ${credentials}`, 'Accept': 'application/json' }
+  };
+  const req = https.request(options, (res) => { let data = ''; res.on('data', chunk => data += chunk); res.on('end', () => callback(null, data)); });
+  req.on('error', callback);
+  req.end();
+}
 
 function proxyJiraRequest(jql, fields, callback) {
   const credentials = Buffer.from(`${EMAIL}:${API_TOKEN}`).toString('base64');
@@ -427,6 +453,17 @@ function getHTML() {
       </div>
     </div>
 
+    <!-- Global User Filter -->
+    <div class="controls no-print" style="margin-bottom: 16px;">
+      <div class="control-group">
+        <label>Team Member:</label>
+        <select id="globalUserFilter" onchange="onUserFilterChange()" style="min-width: 200px;">
+          <option value="">All Users</option>
+        </select>
+      </div>
+      <span id="userFilterBadge" style="display:none;" class="badge badge-info"></span>
+    </div>
+
     <!-- Tabs -->
     <div class="tabs no-print">
       <button class="tab active" data-tab="daily">Daily</button>
@@ -635,6 +672,10 @@ function getHTML() {
   <script>
     const PROJECT = 'HY';
     let dailyPieChart, dailyTrendChart, teamPieChart7, teamPieChart15, teamPieChartSprint, sprintTrendChart;
+    let lastDailyData = null, lastDailyDate = null;
+    let lastRange7Data = null, lastRange7Start = null, lastRange7End = null;
+    let lastRange15Data = null, lastRange15Start = null, lastRange15End = null;
+    let lastCustomData = null, lastCustomStart = null, lastCustomEnd = null, lastCustomName = null;
 
     // Chart defaults
     Chart.defaults.color = '#8B949E';
@@ -665,6 +706,53 @@ function getHTML() {
     const sprintEndDefault = new Date(today.getTime());
     document.getElementById('sprintStart').value = formatDateDB(sprintStartDefault);
     document.getElementById('sprintEnd').value = formatDateDB(sprintEndDefault);
+
+    async function fetchUsers() {
+      try {
+        const res = await fetch('/api/users');
+        const users = await res.json();
+        const select = document.getElementById('globalUserFilter');
+        if (Array.isArray(users)) {
+          users.forEach(u => {
+            const opt = document.createElement('option');
+            opt.value = u.accountId;        // accountId used in JQL filter
+            opt.textContent = u.displayName;
+            select.appendChild(opt);
+          });
+        }
+      } catch (e) { /* silent — users dropdown is optional */ }
+    }
+
+    function getSelectedAccountId() {
+      return document.getElementById('globalUserFilter').value;  // accountId or ''
+    }
+
+    function getSelectedDisplayName() {
+      const select = document.getElementById('globalUserFilter');
+      return select.options[select.selectedIndex].textContent;
+    }
+
+    function buildAuthorFilter() {
+      const accountId = getSelectedAccountId();
+      return accountId ? " AND worklogAuthor = '" + accountId + "'" : '';
+    }
+
+    function onUserFilterChange() {
+      const accountId = getSelectedAccountId();
+      const badge = document.getElementById('userFilterBadge');
+      if (accountId) {
+        badge.style.display = 'inline';
+        badge.textContent = 'Filtered: ' + getSelectedDisplayName();
+      } else {
+        badge.style.display = 'none';
+      }
+      // Re-fetch with new JQL so server-side author filter is applied
+      const activeTab = document.querySelector('.tab.active').dataset.tab;
+      if (activeTab === 'daily') loadDaily();
+      else if (activeTab === '7days') loadDateRange(7);
+      else if (activeTab === '15days') loadDateRange(15);
+      else if (activeTab === 'sprint') loadCustomRange();
+    }
 
     async function fetchJira(jql, fields) {
       const res = await fetch('/api/jira', {
@@ -796,8 +884,10 @@ function getHTML() {
       if (!date) return;
       document.getElementById('reportPeriod').textContent = formatDateDisplay(date);
       try {
-        const data = await fetchJira("project = '" + PROJECT + "' AND worklogDate = '" + date + "'");
+        const jql = "project = '" + PROJECT + "' AND worklogDate = '" + date + "'" + buildAuthorFilter();
+        const data = await fetchJira(jql);
         if (data.error) throw new Error(data.error);
+        lastDailyData = data; lastDailyDate = date;
         renderDaily(data, date);
       } catch (err) { showError(err.message); }
     }
@@ -841,9 +931,11 @@ function getHTML() {
       document.getElementById('reportPeriod').textContent = formatDateDisplay(startStr) + ' - ' + formatDateDisplay(endStr);
 
       try {
-        const jql = "project = '" + PROJECT + "' AND worklogDate >= '" + startStr + "' AND worklogDate <= '" + endStr + "'";
+        const jql = "project = '" + PROJECT + "' AND worklogDate >= '" + startStr + "' AND worklogDate <= '" + endStr + "'" + buildAuthorFilter();
         const data = await fetchJira(jql);
         if (data.error) throw new Error(data.error);
+        if (days === 7) { lastRange7Data = data; lastRange7Start = startStr; lastRange7End = endStr; }
+        else { lastRange15Data = data; lastRange15Start = startStr; lastRange15End = endStr; }
         renderDateRange(data, startStr, endStr, days);
       } catch (err) { showError(err.message); }
     }
@@ -925,9 +1017,10 @@ function getHTML() {
       document.getElementById('reportPeriod').textContent = sprintName + ' (' + formatDateDisplay(start) + ' - ' + formatDateDisplay(end) + ')';
 
       try {
-        const jql = "project = '" + PROJECT + "' AND worklogDate >= '" + start + "' AND worklogDate <= '" + end + "'";
+        const jql = "project = '" + PROJECT + "' AND worklogDate >= '" + start + "' AND worklogDate <= '" + end + "'" + buildAuthorFilter();
         const data = await fetchJira(jql);
         if (data.error) throw new Error(data.error);
+        lastCustomData = data; lastCustomStart = start; lastCustomEnd = end; lastCustomName = sprintName;
         renderCustomRange(data, sprintName, start, end);
       } catch (err) { showError(err.message); }
     }
@@ -988,6 +1081,7 @@ function getHTML() {
     }
 
     // Init
+    fetchUsers();
     loadDaily();
   </script>
 </body>
